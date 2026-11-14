@@ -1,4 +1,3 @@
-
 package com.pagewall.app;
 
 import android.app.Activity;
