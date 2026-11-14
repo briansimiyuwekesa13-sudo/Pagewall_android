@@ -62,8 +62,8 @@ public class MainActivity extends Activity {
     }
 
     private void showLibrary() {
-
-        closePdf();
+        getWindow().getDecorView().setSystemUiVisibility(0);
+     closePdf();
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -333,7 +333,14 @@ public class MainActivity extends Activity {
     }
 
     private void showReader() {
-
+getWindow().getDecorView().setSystemUiVisibility(
+    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+    | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(12, 15, 12, 12);
