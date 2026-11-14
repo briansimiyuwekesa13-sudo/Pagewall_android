@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.pdf.PdfRenderer;
@@ -31,9 +32,17 @@ public class MainActivity extends Activity {
 
     int currentPage = 0;
 
+    SharedPreferences preferences;
+
+    File savedBook;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        preferences = getSharedPreferences("PageWallData", MODE_PRIVATE);
+
+        savedBook = new File(getFilesDir(), "my_book.pdf");
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -86,7 +95,7 @@ public class MainActivity extends Activity {
         });
 
         previous.setOnClickListener(v -> {
-            if (currentPage > 0) {
+            if (renderer != null && currentPage > 0) {
                 currentPage--;
                 displayPage();
             }
@@ -111,6 +120,14 @@ public class MainActivity extends Activity {
         layout.addView(controls);
 
         setContentView(layout);
+
+        if (savedBook.exists()) {
+            try {
+                openSavedBook();
+            } catch (Exception e) {
+                status.setText("Could not restore your book.");
+            }
+        }
     }
 
     @Override
@@ -126,22 +143,19 @@ public class MainActivity extends Activity {
             data != null) {
 
             try {
-                openPdf(data.getData());
+                saveNewBook(data.getData());
+                openSavedBook();
             } catch (Exception e) {
                 status.setText("Unable to open PDF: " + e.getMessage());
             }
         }
     }
 
-    private void openPdf(Uri uri) throws IOException {
-
-        closePdf();
-
-        File file = new File(getCacheDir(), "pagewall_book.pdf");
+    private void saveNewBook(Uri uri) throws IOException {
 
         try (
             InputStream input = getContentResolver().openInputStream(uri);
-            FileOutputStream output = new FileOutputStream(file)
+            FileOutputStream output = new FileOutputStream(savedBook)
         ) {
             if (input == null) {
                 throw new IOException("Cannot read selected file");
@@ -155,16 +169,29 @@ public class MainActivity extends Activity {
             }
         }
 
+        preferences.edit()
+            .putInt("last_page", 0)
+            .apply();
+    }
+
+    private void openSavedBook() throws IOException {
+
+        closePdf();
+
         fileDescriptor = ParcelFileDescriptor.open(
-            file,
+            savedBook,
             ParcelFileDescriptor.MODE_READ_ONLY
         );
 
         renderer = new PdfRenderer(fileDescriptor);
 
-        currentPage = 0;
+        currentPage = preferences.getInt("last_page", 0);
 
-        status.setText("Your book is open!");
+        if (currentPage >= renderer.getPageCount()) {
+            currentPage = 0;
+        }
+
+        status.setText("Your book is ready!");
         displayPage();
     }
 
@@ -195,6 +222,10 @@ public class MainActivity extends Activity {
                 " of " + renderer.getPageCount()
             );
 
+            preferences.edit()
+                .putInt("last_page", currentPage)
+                .apply();
+
         } finally {
             page.close();
         }
@@ -216,6 +247,15 @@ public class MainActivity extends Activity {
 
             fileDescriptor = null;
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        preferences.edit()
+            .putInt("last_page", currentPage)
+            .apply();
     }
 
     @Override
