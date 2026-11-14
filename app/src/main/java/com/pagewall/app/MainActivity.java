@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.pdf.PdfRenderer;
@@ -14,6 +16,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
@@ -23,45 +26,337 @@ import java.io.IOException;
 
 public class MainActivity extends Activity {
 
+    SharedPreferences preferences;
+
+    LinearLayout root;
+    LinearLayout libraryList;
+
     TextView status;
     TextView pageNumber;
+    TextView bookTitle;
+
     ImageView imageView;
 
     PdfRenderer renderer;
     ParcelFileDescriptor fileDescriptor;
 
+    File currentBook;
+
     int currentPage = 0;
-
-    SharedPreferences preferences;
-
-    File savedBook;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        preferences = getSharedPreferences("PageWallData", MODE_PRIVATE);
+        preferences = getSharedPreferences(
+            "PageWallData", MODE_PRIVATE
+        );
 
-        savedBook = new File(getFilesDir(), "my_book.pdf");
+        File booksFolder = new File(getFilesDir(), "books");
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(20, 25, 20, 20);
-        layout.setBackgroundColor(Color.WHITE);
+        if (!booksFolder.exists()) {
+            booksFolder.mkdirs();
+        }
+
+        showLibrary();
+    }
+
+    private void showLibrary() {
+
+        closePdf();
+
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(20, 25, 20, 20);
+        root.setBackgroundColor(Color.WHITE);
 
         TextView title = new TextView(this);
         title.setText("PAGEWALL");
-        title.setTextSize(28);
+        title.setTextSize(30);
         title.setGravity(Gravity.CENTER);
         title.setTextColor(Color.BLACK);
 
-        status = new TextView(this);
-        status.setText("Your personal digital library.");
-        status.setGravity(Gravity.CENTER);
-        status.setTextSize(16);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("YOUR PERSONAL DIGITAL LIBRARY");
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setTextSize(14);
+        subtitle.setTextColor(Color.DKGRAY);
 
         Button upload = new Button(this);
-        upload.setText("UPLOAD YOUR BOOK");
+        upload.setText("+ ADD A BOOK");
+
+        upload.setOnClickListener(v -> {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.setType("application/pdf");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(intent, 100);
+        });
+
+        TextView heading = new TextView(this);
+        heading.setText("MY BOOKS");
+        heading.setTextSize(21);
+        heading.setTextColor(Color.BLACK);
+        heading.setPadding(0, 20, 0, 10);
+
+        ScrollView scrollView = new ScrollView(this);
+
+        libraryList = new LinearLayout(this);
+        libraryList.setOrientation(LinearLayout.VERTICAL);
+
+        scrollView.addView(libraryList);
+
+        root.addView(title);
+        root.addView(subtitle);
+        root.addView(upload);
+        root.addView(heading);
+
+        root.addView(
+            scrollView,
+            new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+            )
+        );
+
+        setContentView(root);
+
+        loadBooks();
+    }
+
+    private void loadBooks() {
+
+        libraryList.removeAllViews();
+
+        File folder = new File(getFilesDir(), "books");
+        File[] books = folder.listFiles();
+
+        if (books == null || books.length == 0) {
+
+            TextView empty = new TextView(this);
+            empty.setText(
+                "Your library is empty.\nAdd your first PDF book!"
+            );
+            empty.setGravity(Gravity.CENTER);
+            empty.setTextSize(17);
+            empty.setPadding(15, 40, 15, 40);
+
+            libraryList.addView(empty);
+            return;
+        }
+
+        for (File book : books) {
+
+            if (!book.isFile() ||
+                !book.getName().endsWith(".pdf")) {
+                continue;
+            }
+
+            String fileName = book.getName();
+
+            String name = preferences.getString(
+                "title_" + fileName,
+                fileName
+            );
+
+            int savedPage = preferences.getInt(
+                "page_" + fileName, 0
+            );
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(15, 15, 15, 15);
+            card.setBackgroundColor(0xFFEFEFEF);
+
+            TextView bookName = new TextView(this);
+            bookName.setText("📖 " + name);
+            bookName.setTextSize(19);
+            bookName.setTextColor(Color.BLACK);
+
+            TextView progress = new TextView(this);
+            progress.setText(
+                "Last reading page: " + (savedPage + 1)
+            );
+            progress.setTextSize(14);
+
+            Button open = new Button(this);
+            open.setText("OPEN BOOK");
+
+            open.setOnClickListener(v -> {
+                try {
+                    openBook(book);
+                } catch (Exception e) {
+                    statusMessage(
+                        "Unable to open book: " + e.getMessage()
+                    );
+                }
+            });
+
+            card.addView(bookName);
+            card.addView(progress);
+            card.addView(open);
+
+            LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+
+            params.setMargins(0, 8, 0, 12);
+
+            libraryList.addView(card, params);
+        }
+    }
+
+    private void statusMessage(String message) {
+        android.widget.Toast.makeText(
+            this,
+            message,
+            android.widget.Toast.LENGTH_LONG
+        ).show();
+    }
+
+    @Override
+    protected void onActivityResult(
+        int requestCode,
+        int resultCode,
+        Intent data
+    ) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == 100 &&
+            resultCode == RESULT_OK &&
+            data != null) {
+
+            try {
+                addBook(data.getData());
+            } catch (Exception e) {
+                statusMessage("Upload failed: " + e.getMessage());
+            }
+        }
+    }
+
+    private void addBook(Uri uri) throws IOException {
+
+        String originalName = "My Book.pdf";
+
+        Cursor cursor = getContentResolver().query(
+            uri,
+            null,
+            null,
+            null,
+            null
+        );
+
+        if (cursor != null) {
+            try {
+                if (cursor.moveToFirst()) {
+                    int index = cursor.getColumnIndex(
+                        OpenableColumns.DISPLAY_NAME
+                    );
+
+                    if (index >= 0) {
+                        originalName = cursor.getString(index);
+                    }
+                }
+            } finally {
+                cursor.close();
+            }
+        }
+
+        String safeName = originalName.replaceAll(
+            "[^a-zA-Z0-9._-]", "_"
+        );
+
+        if (!safeName.toLowerCase().endsWith(".pdf")) {
+            safeName += ".pdf";
+        }
+
+        String fileName =
+            System.currentTimeMillis() + "_" + safeName;
+
+        File folder = new File(getFilesDir(), "books");
+        File destination = new File(folder, fileName);
+
+        try (
+            InputStream input =
+                getContentResolver().openInputStream(uri);
+            FileOutputStream output =
+                new FileOutputStream(destination)
+        ) {
+
+            if (input == null) {
+                throw new IOException("Cannot read selected file");
+            }
+
+            byte[] buffer = new byte[8192];
+            int length;
+
+            while ((length = input.read(buffer)) != -1) {
+                output.write(buffer, 0, length);
+            }
+        }
+
+        preferences.edit()
+            .putString("title_" + fileName, originalName)
+            .putInt("page_" + fileName, 0)
+            .apply();
+
+        showLibrary();
+
+        statusMessage("Book added to your library!");
+    }
+
+    private void openBook(File book) throws IOException {
+
+        closePdf();
+
+        currentBook = book;
+
+        fileDescriptor = ParcelFileDescriptor.open(
+            book,
+            ParcelFileDescriptor.MODE_READ_ONLY
+        );
+
+        renderer = new PdfRenderer(fileDescriptor);
+
+        currentPage = preferences.getInt(
+            "page_" + book.getName(), 0
+        );
+
+        if (currentPage >= renderer.getPageCount()) {
+            currentPage = 0;
+        }
+
+        showReader();
+        displayPage();
+    }
+
+    private void showReader() {
+
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(12, 15, 12, 12);
+        root.setBackgroundColor(Color.WHITE);
+
+        Button back = new Button(this);
+        back.setText("← MY LIBRARY");
+
+        back.setOnClickListener(v -> showLibrary());
+
+        bookTitle = new TextView(this);
+        bookTitle.setText(
+            preferences.getString(
+                "title_" + currentBook.getName(),
+                "My Book"
+            )
+        );
+        bookTitle.setTextSize(20);
+        bookTitle.setTextColor(Color.BLACK);
+        bookTitle.setGravity(Gravity.CENTER);
+
+        status = new TextView(this);
+        status.setGravity(Gravity.CENTER);
 
         imageView = new ImageView(this);
         imageView.setAdjustViewBounds(true);
@@ -87,15 +382,8 @@ public class MainActivity extends Activity {
         Button next = new Button(this);
         next.setText("NEXT");
 
-        upload.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.setType("application/pdf");
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(intent, 100);
-        });
-
         previous.setOnClickListener(v -> {
-            if (renderer != null && currentPage > 0) {
+            if (currentPage > 0) {
                 currentPage--;
                 displayPage();
             }
@@ -112,87 +400,14 @@ public class MainActivity extends Activity {
         controls.addView(previous);
         controls.addView(next);
 
-        layout.addView(title);
-        layout.addView(status);
-        layout.addView(upload);
-        layout.addView(imageView, imageParams);
-        layout.addView(pageNumber);
-        layout.addView(controls);
+        root.addView(back);
+        root.addView(bookTitle);
+        root.addView(status);
+        root.addView(imageView, imageParams);
+        root.addView(pageNumber);
+        root.addView(controls);
 
-        setContentView(layout);
-
-        if (savedBook.exists()) {
-            try {
-                openSavedBook();
-            } catch (Exception e) {
-                status.setText("Could not restore your book.");
-            }
-        }
-    }
-
-    @Override
-    protected void onActivityResult(
-        int requestCode,
-        int resultCode,
-        Intent data
-    ) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode == 100 &&
-            resultCode == RESULT_OK &&
-            data != null) {
-
-            try {
-                saveNewBook(data.getData());
-                openSavedBook();
-            } catch (Exception e) {
-                status.setText("Unable to open PDF: " + e.getMessage());
-            }
-        }
-    }
-
-    private void saveNewBook(Uri uri) throws IOException {
-
-        try (
-            InputStream input = getContentResolver().openInputStream(uri);
-            FileOutputStream output = new FileOutputStream(savedBook)
-        ) {
-            if (input == null) {
-                throw new IOException("Cannot read selected file");
-            }
-
-            byte[] buffer = new byte[8192];
-            int length;
-
-            while ((length = input.read(buffer)) != -1) {
-                output.write(buffer, 0, length);
-            }
-        }
-
-        preferences.edit()
-            .putInt("last_page", 0)
-            .apply();
-    }
-
-    private void openSavedBook() throws IOException {
-
-        closePdf();
-
-        fileDescriptor = ParcelFileDescriptor.open(
-            savedBook,
-            ParcelFileDescriptor.MODE_READ_ONLY
-        );
-
-        renderer = new PdfRenderer(fileDescriptor);
-
-        currentPage = preferences.getInt("last_page", 0);
-
-        if (currentPage >= renderer.getPageCount()) {
-            currentPage = 0;
-        }
-
-        status.setText("Your book is ready!");
-        displayPage();
+        setContentView(root);
     }
 
     private void displayPage() {
@@ -202,9 +417,24 @@ public class MainActivity extends Activity {
         PdfRenderer.Page page = renderer.openPage(currentPage);
 
         try {
+
+            int screenWidth =
+                getResources().getDisplayMetrics().widthPixels - 40;
+
+            float scale =
+                Math.min(1f, (float) screenWidth / page.getWidth());
+
+            int width = Math.max(
+                1, (int) (page.getWidth() * scale)
+            );
+
+            int height = Math.max(
+                1, (int) (page.getHeight() * scale)
+            );
+
             Bitmap bitmap = Bitmap.createBitmap(
-                page.getWidth(),
-                page.getHeight(),
+                width,
+                height,
                 Bitmap.Config.ARGB_8888
             );
 
@@ -223,7 +453,10 @@ public class MainActivity extends Activity {
             );
 
             preferences.edit()
-                .putInt("last_page", currentPage)
+                .putInt(
+                    "page_" + currentBook.getName(),
+                    currentPage
+                )
                 .apply();
 
         } finally {
@@ -253,9 +486,14 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
 
-        preferences.edit()
-            .putInt("last_page", currentPage)
-            .apply();
+        if (currentBook != null) {
+            preferences.edit()
+                .putInt(
+                    "page_" + currentBook.getName(),
+                    currentPage
+                )
+                .apply();
+        }
     }
 
     @Override
